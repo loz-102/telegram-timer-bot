@@ -1,14 +1,14 @@
 import os
 import sqlite3
 import time
-import asyncio
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+import threading
+from telegram import Bot, Update
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
 OWNER_ID = 5486316497
 DB = "timers.db"
 
-# Database functions
+# Initialize DB
 def init_db():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
@@ -43,8 +43,8 @@ def get_timer(chat_id):
     conn.close()
     return row[0] if row else None
 
-# Background checker
-async def timer_checker(app: Application):
+# Timer checker thread
+def timer_checker(bot):
     while True:
         conn = sqlite3.connect(DB)
         c = conn.cursor()
@@ -54,67 +54,66 @@ async def timer_checker(app: Application):
         for chat_id, end_time in rows:
             if now >= end_time:
                 try:
-                    await app.bot.send_message(chat_id=chat_id, text="⚠️ ALERT")
-                except Exception as e:
-                    print("Failed to send alert:", e)
+                    bot.send_message(chat_id=chat_id, text="⚠️ ALERT")
+                except:
+                    pass
                 delete_timer(chat_id)
         conn.close()
-        await asyncio.sleep(5)
+        time.sleep(5)
 
-# Start timer
-async def start_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# /timer command
+def start_timer(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-
     if not context.args:
-        await update.message.reply_text("Usage: /timer 0.5 (fractional hours allowed)")
+        update.message.reply_text("Usage: /timer 0.5 (hours, fractions allowed)")
         return
-
     try:
         hours = float(context.args[0])
         if hours <= 0:
-            await update.message.reply_text("Please enter a number greater than 0.")
+            update.message.reply_text("Enter a number greater than 0")
             return
     except:
-        await update.message.reply_text("Please enter a valid number.")
+        update.message.reply_text("Enter a valid number")
         return
-
     chat_id = update.effective_chat.id
     if get_timer(chat_id):
-        await update.message.reply_text("A timer is already running.")
+        update.message.reply_text("Timer already running")
         return
-
     end_time = int(time.time() + hours * 3600)
     set_timer(chat_id, end_time)
-    await update.message.reply_text(f"⏳ Timer started for {hours} hours.")
+    update.message.reply_text(f"⏳ Timer started for {hours} hours")
 
-# Stop timer
-async def panama_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Stop timer with "Panama"
+def panama_stop(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-
     chat_id = update.effective_chat.id
     if get_timer(chat_id):
         delete_timer(chat_id)
-        await update.message.reply_text("🛑 Timer stopped.")
+        update.message.reply_text("🛑 Timer stopped")
 
-# Main
 def main():
     TOKEN = os.environ.get("BOT_TOKEN")
     if not TOKEN:
-        print("Error: BOT_TOKEN not set")
+        print("BOT_TOKEN not set in environment")
         return
 
-    app = Application.builder().token(TOKEN).build()
+    init_db()
 
-    app.add_handler(CommandHandler("timer", start_timer))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^Panama$"), panama_stop))
+    bot = Bot(TOKEN)
+    updater = Updater(bot=bot, use_context=True)
+    dp = updater.dispatcher
 
-    # Start background task
-    asyncio.create_task(timer_checker(app))
+    dp.add_handler(CommandHandler("timer", start_timer))
+    dp.add_handler(MessageHandler(Filters.text & Filters.regex("^Panama$"), panama_stop))
+
+    # Start timer checker thread
+    threading.Thread(target=timer_checker, args=(bot,), daemon=True).start()
 
     print("Bot running...")
-    app.run_polling()
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
