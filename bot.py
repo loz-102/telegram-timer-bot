@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 OWNER_ID = 5486316497
 DB = "timers.db"
 
-# DB setup
+# Database functions
 def init_db():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
@@ -53,18 +53,21 @@ async def timer_checker(app: Application):
         now = int(time.time())
         for chat_id, end_time in rows:
             if now >= end_time:
-                await app.bot.send_message(chat_id=chat_id, text="⚠️ ALERT")
+                try:
+                    await app.bot.send_message(chat_id=chat_id, text="⚠️ ALERT")
+                except Exception as e:
+                    print("Failed to send alert:", e)
                 delete_timer(chat_id)
         conn.close()
-        await asyncio.sleep(5)  # check every 5 seconds
+        await asyncio.sleep(5)
 
-# Start timer command
+# Start timer
 async def start_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
 
     if not context.args:
-        await update.message.reply_text("Usage: /timer 0.5  (fractional hours allowed)")
+        await update.message.reply_text("Usage: /timer 0.5 (fractional hours allowed)")
         return
 
     try:
@@ -77,7 +80,6 @@ async def start_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     chat_id = update.effective_chat.id
-
     if get_timer(chat_id):
         await update.message.reply_text("A timer is already running.")
         return
@@ -86,7 +88,7 @@ async def start_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_timer(chat_id, end_time)
     await update.message.reply_text(f"⏳ Timer started for {hours} hours.")
 
-# Stop timer command
+# Stop timer
 async def panama_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
@@ -97,23 +99,22 @@ async def panama_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🛑 Timer stopped.")
 
 # Main
-async def main():
+def main():
     TOKEN = os.environ.get("BOT_TOKEN")
     if not TOKEN:
-        print("Error: BOT_TOKEN not set in environment!")
+        print("Error: BOT_TOKEN not set")
         return
 
     app = Application.builder().token(TOKEN).build()
 
-    # Handlers
     app.add_handler(CommandHandler("timer", start_timer))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^Panama$"), panama_stop))
 
-    # Start background checker task
+    # Start background task
     asyncio.create_task(timer_checker(app))
 
     print("Bot running...")
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
